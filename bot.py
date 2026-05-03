@@ -2,10 +2,10 @@
 import os
 import asyncio
 import json
-import random
 import time
 from datetime import datetime
 
+# Отключаем прокси (на Render они не нужны)
 for var in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]:
     os.environ[var] = ""
 
@@ -13,28 +13,20 @@ import google.generativeai as genai
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
-# ========== ТОКЕНЫ (ЗАМЕНИ НА СВОИ) ==========
-TELEGRAM_TOKEN = "НОВЫЙ_ТОКЕН_TELEGRAM"
-GEMINI_KEY = "НОВЫЙ_КЛЮЧ_GEMINI"
+# ========== ЧТЕНИЕ ТОКЕНОВ ИЗ ОКРУЖЕНИЯ ==========
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 BOSS_ID = 1383365424
-# ===========================================
 
-genai.configure(api_key=GEMINI_KEY)
+if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
+    print("❌ Ошибка: не заданы переменные окружения TELEGRAM_TOKEN или GEMINI_API_KEY")
+    exit(1)
 
-# ---- Автовыбор модели ----
-PRIORITY = ["gemini-1.5-flash", "gemini-1.5-pro"]
-def select_model():
-    try:
-        available = [m.name.replace("models/", "") for m in genai.list_models() if "generateContent" in m.supported_generation_methods]
-        for p in PRIORITY:
-            if p in available: return p
-        return available[0] if available else "gemini-1.5-flash"
-    except: return "gemini-1.5-flash"
-MODEL = select_model()
-model = genai.GenerativeModel(MODEL)
-print(f"✅ Модель: {MODEL}")
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel("gemini-1.5-flash")
+print("✅ Бот запускается...")
 
-# ---- Профили, память, стиль босса ----
+# ---------- ПРОФИЛИ, ПАМЯТЬ, СТИЛЬ БОССА ----------
 profiles = {}
 history = {}
 boss_style = {"profile": "", "msgs": []}
@@ -42,21 +34,25 @@ last_style_update = 0
 
 def load():
     global profiles, history, boss_style, last_style_update
-    try: profiles = json.load(open("profiles.json"))
+    try:
+        with open("profiles.json") as f: profiles = json.load(f)
     except: profiles = {}
-    try: history = {int(k): v for k, v in json.load(open("history.json")).items()}
+    try:
+        with open("history.json") as f: history = {int(k): v for k, v in json.load(f).items()}
     except: history = {}
     try:
-        with open("boss_style.json") as f: d = json.load(f)
-        boss_style["profile"] = d.get("profile", "")
-        last_style_update = d.get("time", 0)
-        boss_style["msgs"] = d.get("msgs", [])
+        with open("boss_style.json") as f:
+            d = json.load(f)
+            boss_style["profile"] = d.get("profile", "")
+            last_style_update = d.get("time", 0)
+            boss_style["msgs"] = d.get("msgs", [])
     except: pass
 
 def save():
-    json.dump(profiles, open("profiles.json", "w"), indent=2)
-    json.dump(history, open("history.json", "w"), indent=2)
-    json.dump({"profile": boss_style["profile"], "time": last_style_update, "msgs": boss_style["msgs"][-50:]}, open("boss_style.json", "w"))
+    with open("profiles.json", "w") as f: json.dump(profiles, f, indent=2)
+    with open("history.json", "w") as f: json.dump(history, f, indent=2)
+    with open("boss_style.json", "w") as f:
+        json.dump({"profile": boss_style["profile"], "time": last_style_update, "msgs": boss_style["msgs"][-50:]}, f)
 
 def get_profile(uid):
     uid = str(uid)
@@ -150,20 +146,20 @@ async def commands(update, context):
         save()
         await msg.reply_text("📝 Факт сохранён")
     elif cmd == "/status":
-        await msg.reply_text(f"🤖 Модель: {MODEL}\nПрофилей: {len(profiles)}\nСтиль босса: {'✅' if boss_style['profile'] else '⏳'}")
+        await msg.reply_text(f"🤖 Модель: gemini-1.5-flash\nПрофилей: {len(profiles)}\nСтиль босса: {'✅' if boss_style['profile'] else '⏳'}")
     else:
         await msg.reply_text("Команды: /setlevel, /addfact, /status")
 
 async def main():
     load()
-    app = Application.builder().token(TOKEN).build()
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
     app.add_handler(CommandHandler("setlevel", commands))
     app.add_handler(CommandHandler("addfact", commands))
     app.add_handler(CommandHandler("status", commands))
     print("🔄 Сброс вебхука...")
     await app.bot.delete_webhook(drop_pending_updates=True)
-    print("✅ Бот запущен")
+    print("✅ Бот запущен и готов к работе")
     await app.run_polling()
 
 if __name__ == "__main__":
