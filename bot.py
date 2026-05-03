@@ -14,7 +14,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
 # ========== ТОКЕНЫ (ЗАМЕНИ НА СВОИ) ==========
-TOKEN = "НОВЫЙ_ТОКЕН_TELEGRAM"
+TELEGRAM_TOKEN = "НОВЫЙ_ТОКЕН_TELEGRAM"
 GEMINI_KEY = "НОВЫЙ_КЛЮЧ_GEMINI"
 BOSS_ID = 1383365424
 # ===========================================
