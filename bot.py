@@ -5,7 +5,7 @@ import json
 import time
 from datetime import datetime
 
-# Отключаем прокси (на Render они не нужны)
+# Отключение прокси (на Render не нужно)
 for var in ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"]:
     os.environ[var] = ""
 
@@ -13,26 +13,26 @@ import google.generativeai as genai
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
-# ========== ЧТЕНИЕ ТОКЕНОВ ИЗ ОКРУЖЕНИЯ ==========
+# --- Токены из переменных окружения (безопасно) ---
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 BOSS_ID = 1383365424
 
 if not TELEGRAM_TOKEN or not GEMINI_API_KEY:
-    print("❌ Ошибка: не заданы переменные окружения TELEGRAM_TOKEN или GEMINI_API_KEY")
+    print("❌ Ошибка: переменные TELEGRAM_TOKEN или GEMINI_API_KEY не заданы")
     exit(1)
 
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel("gemini-1.5-flash")
 print("✅ Бот запускается...")
 
-# ---------- ПРОФИЛИ, ПАМЯТЬ, СТИЛЬ БОССА ----------
+# --- Профили, память, стиль босса ---
 profiles = {}
 history = {}
 boss_style = {"profile": "", "msgs": []}
 last_style_update = 0
 
-def load():
+def load_data():
     global profiles, history, boss_style, last_style_update
     try:
         with open("profiles.json") as f: profiles = json.load(f)
@@ -48,7 +48,7 @@ def load():
             boss_style["msgs"] = d.get("msgs", [])
     except: pass
 
-def save():
+def save_data():
     with open("profiles.json", "w") as f: json.dump(profiles, f, indent=2)
     with open("history.json", "w") as f: json.dump(history, f, indent=2)
     with open("boss_style.json", "w") as f:
@@ -59,7 +59,7 @@ def get_profile(uid):
     if uid not in profiles:
         profiles[uid] = {"level": "neutral", "score": 0}
         if uid == str(BOSS_ID): profiles[uid]["level"] = "boss"
-        save()
+        save_data()
     return profiles[uid]
 
 def update_relation(uid, delta):
@@ -67,7 +67,7 @@ def update_relation(uid, delta):
     p = get_profile(uid)
     p["score"] = max(-10, min(10, p["score"] + delta))
     p["level"] = "loved" if p["score"] >= 7 else ("hated" if p["score"] <= -7 else "neutral")
-    save()
+    save_data()
 
 def relation_text(uid):
     if uid == BOSS_ID: return "босс"
@@ -76,7 +76,7 @@ def relation_text(uid):
 async def update_boss_style(text):
     global last_style_update
     boss_style["msgs"].append(text)
-    if len(boss_style["msgs"]) > 50: boss_style["msgs"] = boss_style["msgs"][-50:]
+    boss_style["msgs"] = boss_style["msgs"][-50:]
     if time.time() - last_style_update > 86400 or len(boss_style["msgs"]) % 10 == 0:
         if len(boss_style["msgs"]) >= 5:
             sample = "\n".join(boss_style["msgs"][-20:])
@@ -84,7 +84,7 @@ async def update_boss_style(text):
                 resp = model.generate_content(f"Опиши стиль речи человека кратко:\n{sample}")
                 boss_style["profile"] = resp.text.strip()
                 last_style_update = time.time()
-                save()
+                save_data()
             except: pass
 
 pending = {}
@@ -95,19 +95,24 @@ async def handle(update, context):
     if uid == BOSS_ID: await update_boss_style(text)
     bot_name = context.bot.username.lower()
     is_private = msg.chat.type == "private"
+    # Должен ли бот отвечать?
     need = is_private or any(x in text.lower() for x in [f"@{bot_name}", "дудосенька", "додосик"]) or (msg.reply_to_message and msg.reply_to_message.from_user.id == context.bot.id)
     if not need: return
+    # Команды босса
     if uid == BOSS_ID and text.startswith("/"):
         await commands(update, context)
         return
+    # Обращение к боссу -> отложенный ответ
     if ("@ddsenk" in text.lower() or "создатель" in text.lower()) and uid != BOSS_ID:
         if msg.message_id in pending: pending[msg.message_id].cancel()
         pending[msg.message_id] = asyncio.create_task(delayed_reply(update, context, msg))
         return
+    # Автооценка отношения
     bad = ["дурак","идиот","тупой","плохой","надоел","заткнись"]
     good = ["спасибо","классно","умный","круто","люблю","приятно"]
     score = sum(-1 for w in bad if w in text.lower()) + sum(1 for w in good if w in text.lower())
     if score: update_relation(uid, score)
+    # Сохраняем историю
     if cid not in history: history[cid] = []
     ctx = "\n".join(history[cid][-10:])
     style_instr = f"\nПодражай стилю босса: {boss_style['profile']}" if boss_style["profile"] else ""
@@ -119,7 +124,7 @@ async def handle(update, context):
         reply = f"Ошибка: {e}"
     history[cid].append(f"User: {text}")
     history[cid].append(f"Bot: {reply}")
-    save()
+    save_data()
     await msg.reply_text(reply[:4000])
 
 async def delayed_reply(update, context, msg):
@@ -136,14 +141,14 @@ async def commands(update, context):
             p = get_profile(tid)
             p["level"] = lvl
             p["score"] = 7 if lvl=="loved" else (-7 if lvl=="hated" else 0)
-            save()
+            save_data()
             await msg.reply_text(f"✅ {tid} → {lvl}")
     elif cmd == "/addfact" and len(parts) >= 4:
         tid, key, val = int(parts[1]), parts[2], " ".join(parts[3:])
         p = get_profile(tid)
         p["facts"] = p.get("facts", {})
         p["facts"][key] = val
-        save()
+        save_data()
         await msg.reply_text("📝 Факт сохранён")
     elif cmd == "/status":
         await msg.reply_text(f"🤖 Модель: gemini-1.5-flash\nПрофилей: {len(profiles)}\nСтиль босса: {'✅' if boss_style['profile'] else '⏳'}")
@@ -151,7 +156,7 @@ async def commands(update, context):
         await msg.reply_text("Команды: /setlevel, /addfact, /status")
 
 async def main():
-    load()
+    load_data()
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle))
     app.add_handler(CommandHandler("setlevel", commands))
@@ -159,8 +164,11 @@ async def main():
     app.add_handler(CommandHandler("status", commands))
     print("🔄 Сброс вебхука...")
     await app.bot.delete_webhook(drop_pending_updates=True)
-    print("✅ Бот запущен и готов к работе")
+    print("✅ Бот запущен")
     await app.run_polling()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("Бот остановлен")
